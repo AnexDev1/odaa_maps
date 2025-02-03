@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 
+import '../../../../core/utils/map_utils.dart';
+import '../../../../core/widgets/custom_expansion_tile.dart';
 import '../../../../data/model/place_model.dart';
 import '../../../../providers/location_provider.dart';
 import '../../../../providers/map_provider.dart';
+import '../widgets/location_bottom_sheet.dart';
+import '../widgets/map_stack.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   const MapScreen({super.key});
@@ -17,184 +19,52 @@ class MapScreen extends ConsumerStatefulWidget {
 
 class _MapScreenState extends ConsumerState<MapScreen> {
   bool _isLocationLoading = false;
+  bool _isDirectionLoading = false;
   String? _locationError;
+  LatLng? _selectedPlaceLocation;
+  List<LatLng> _routePoints = [];
+
+  final List<Map<String, dynamic>> categories = [
+    {
+      'icon': Icons.local_cafe,
+      'title': 'Cafes',
+      'filter': (Place place) => place.category == 'Cafes',
+    },
+    {
+      'icon': Icons.restaurant,
+      'title': 'Restaurants',
+      'filter': (Place place) => place.category == 'Restaurants',
+    },
+    {
+      'icon': Icons.local_hospital,
+      'title': 'Hospitals',
+      'filter': (Place place) => place.category == 'Hospitals',
+    },
+  ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchUserLocation();
-    });
-  }
-
-  Future<void> _fetchUserLocation() async {
-    if (!mounted) return;
-
-    setState(() {
-      _isLocationLoading = true;
-      _locationError = null;
-    });
-
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showLocationServiceDisabledAlert();
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission != LocationPermission.whileInUse &&
-            permission != LocationPermission.always) {
-          setState(() => _locationError = 'Location permission denied');
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        _showEnableLocationSettingsDialog();
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
+      fetchUserLocation(
+        context: context,
+        setLoading: (loading) => setState(() => _isLocationLoading = loading),
+        setError: (error) => setState(() => _locationError = error),
+        moveMap: (location) {
+          final mapController = ref.read(mapControllerProvider);
+          mapController.move(location, 18.0);
+        },
+        addPlace: (place) {
+          final locationsNotifier = ref.read(locationsProvider.notifier);
+          locationsNotifier.addPlace(place);
+        },
+        updatePlace: (place) {
+          final locationsNotifier = ref.read(locationsProvider.notifier);
+          locationsNotifier.updatePlace(place);
+        },
+        mounted: mounted,
       );
-
-      final mapController = ref.read(mapControllerProvider);
-      mapController.move(
-        LatLng(position.latitude, position.longitude),
-        18.0,
-      );
-
-      final locationsNotifier = ref.read(locationsProvider.notifier);
-      final places = ref.read(locationsProvider);
-      final userLocationIndex = places.indexWhere((place) => place.name == 'Your Location');
-
-      if (userLocationIndex == -1) {
-        locationsNotifier.addPlace(
-          Place(
-            name: 'Your Location',
-            category: 'User',
-            lat: position.latitude,
-            lng: position.longitude,
-            imageUrl: '',
-          ),
-        );
-      } else {
-        locationsNotifier.updatePlace(
-          Place(
-            name: 'Your Location',
-            category: 'User',
-            lat: position.latitude,
-            lng: position.longitude,
-            imageUrl: '',
-          ),
-        );
-      }
-    } catch (e) {
-      setState(() => _locationError = 'Failed to get location: ${e.toString()}');
-    } finally {
-      if (mounted) {
-        setState(() => _isLocationLoading = false);
-      }
-    }
-  }
-
-  void _showLocationServiceDisabledAlert() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Location Services Disabled'),
-        content: const Text('Please enable location services to use this feature'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Geolocator.openLocationSettings(),
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEnableLocationSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Location Permission Required'),
-        content: const Text('Please enable location permissions in app settings'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Geolocator.openAppSettings(),
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBottomDrawer(BuildContext context, String placeName) {
-    if (placeName == 'Your Location') {
-      return;
-    }
-    showModalBottomSheet(
-      context: context,
-      builder: (BuildContext context) {
-        return SizedBox(
-          height: 300,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  placeName,
-                  style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold
-                  ),
-                ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 18.0,
-                        vertical: 10.0
-                    ),
-                    child: Row(
-                      children: [
-                        Image.network(
-                          'https://randomwordgenerator.com/img/picture-generator/5ee7d540435bb10ff3d8992cc12c30771037dbf85254784a722d73d5944c_640.jpg',
-                          width: 200,
-                          height: 200,
-                          fit: BoxFit.cover,
-                        ),
-                        const SizedBox(width: 10),
-                        Image.network(
-                          'https://randomwordgenerator.com/img/picture-generator/5ee7d540435bb10ff3d8992cc12c30771037dbf85254784a722d73d5944c_640.jpg',
-                          width: 200,
-                          height: 200,
-                          fit: BoxFit.cover,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+    });
   }
 
   @override
@@ -222,189 +92,78 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ),
               ),
             ),
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                leading: const Icon(Icons.local_cafe),
-                title: const Text('Cafes'),
-                children: places
-                    .where((place) => place.category == 'Cafes')
-                    .map((place) => ListTile(
-                  title: Text(place.name),
-                  onTap: () {
-                    Navigator.pop(context);
-                    mapController.move(
-                      LatLng(place.lat, place.lng),
-                      18.0,
-                    );
-                  },
-                ))
-                    .toList(),
-              ),
-            ),
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                leading: const Icon(Icons.restaurant),
-                title: const Text('Restaurants'),
-                children: places
-                    .where((place) => place.category == 'Restaurants')
-                    .map((place) => ListTile(
-                  title: Text(place.name),
-                  onTap: () {
-                    Navigator.pop(context);
-                    mapController.move(
-                      LatLng(place.lat, place.lng),
-                      18.0,
-                    );
-                  },
-                ))
-                    .toList(),
-              ),
-            ),
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                leading: const Icon(Icons.local_hospital),
-                title: const Text('Hospitals'),
-                children: places
-                    .where((place) => place.category == 'Hospitals')
-                    .map((place) => ListTile(
-                  title: Text(place.name),
-                  onTap: () {
-                    Navigator.pop(context);
-                    mapController.move(
-                      LatLng(place.lat, place.lng),
-                      18.0,
-                    );
-                  },
-                ))
-                    .toList(),
-              ),
-            ),
+            ...categories.map((category) {
+              return CustomExpansionTile(
+                icon: category['icon'],
+                title: category['title'],
+                places: places.where(category['filter']).toList(),
+                onTap: (location, name, imageUrl) {
+                  _selectedPlaceLocation = location;
+                  mapController.move(_selectedPlaceLocation!, 18.0);
+                  showBottomDrawer(
+                    context: context,
+                    placeName: name,
+                    imageUrl: imageUrl,
+                    isDirectionLoading: _isDirectionLoading,
+                    selectedPlaceLocation: _selectedPlaceLocation,
+                    setLoading: (loading) => setState(() => _isDirectionLoading = loading),
+                    showDirections: (destination) => showDirections(
+                      destination: destination,
+                      setLoading: (loading) => setState(() => _isDirectionLoading = loading),
+                      setError: (error) => setState(() => _locationError = error),
+                      setRoutePoints: (points) => setState(() => _routePoints = points),
+                    ),
+                  );
+                },
+              );
+            }),
           ],
         ),
       ),
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(7.6735, 36.8340),
-              initialZoom: 18.0,
-              onMapReady: () => _fetchUserLocation(),
+      body: MapStack(
+        mapController: mapController,
+        places: places,
+        routePoints: _routePoints,
+        isLocationLoading: _isLocationLoading,
+        locationError: _locationError,
+        onMarkerTap: (location) {
+          _selectedPlaceLocation = location;
+          showBottomDrawer(
+            context: context,
+            placeName: places.firstWhere((place) => place.lat == location.latitude && place.lng == location.longitude).name,
+            imageUrl: places.firstWhere((place) => place.lat == location.latitude && place.lng == location.longitude).imageUrl,
+            isDirectionLoading: _isDirectionLoading,
+            selectedPlaceLocation: _selectedPlaceLocation,
+            setLoading: (loading) => setState(() => _isDirectionLoading = loading),
+            showDirections: (destination) => showDirections(
+              destination: destination,
+              setLoading: (loading) => setState(() => _isDirectionLoading = loading),
+              setError: (error) => setState(() => _locationError = error),
+              setRoutePoints: (points) => setState(() => _routePoints = points),
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=pk.eyJ1IjoiYW5leGRldiIsImEiOiJjbHp6YzZ1ZzQxOHh0Mm1zYW5oNmdhZHRkIn0.EXzK4hcp09SCCv2e0bwXsg',
-              ),
-              MarkerLayer(
-                markers: places.map((place) {
-                  return Marker(
-                    width: 80.0,
-                    height: 80.0,
-                    point: LatLng(place.lat, place.lng),
-                    child: CustomMarker(
-                      position: LatLng(place.lat, place.lng),
-                      color: Colors.blue, // Customize the color as needed
-                      label: place.name,
-                      onTap: () => _showBottomDrawer(context, place.name),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-          if (_isLocationLoading)
-            const Center(child: CircularProgressIndicator()),
-          if (_locationError != null)
-            Positioned(
-              top: 20,
-              left: 20,
-              right: 20,
-              child: Material(
-                color: Colors.redAccent,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                            _locationError!,
-                            style: const TextStyle(color: Colors.white)
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () => setState(() => _locationError = null),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _fetchUserLocation,
+        onPressed: () => fetchUserLocation(
+          context: context,
+          setLoading: (loading) => setState(() => _isLocationLoading = loading),
+          setError: (error) => setState(() => _locationError = error),
+          moveMap: (location) {
+            final mapController = ref.read(mapControllerProvider);
+            mapController.move(location, 18.0);
+          },
+          addPlace: (place) {
+            final locationsNotifier = ref.read(locationsProvider.notifier);
+            locationsNotifier.addPlace(place);
+          },
+          updatePlace: (place) {
+            final locationsNotifier = ref.read(locationsProvider.notifier);
+            locationsNotifier.updatePlace(place);
+          },
+          mounted: mounted,
+        ),
         child: const Icon(Icons.my_location),
-      ),
-    );
-  }
-}
-
-class CustomMarker extends StatelessWidget {
-  final LatLng position;
-  final Color color;
-  final String label;
-  final VoidCallback onTap;
-
-  const CustomMarker({
-    required this.position,
-    required this.color,
-    required this.label,
-    required this.onTap,
-    super.key,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.location_on,
-            color: color,
-            size: 40.0,
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(4),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 2,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 12.0,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
