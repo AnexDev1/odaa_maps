@@ -143,6 +143,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
           );
         },
+
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => fetchUserLocation(
