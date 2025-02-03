@@ -109,6 +109,7 @@ class __BottomSheetContentState extends State<_BottomSheetContent> {
                   await widget.showDirections(widget.selectedPlaceLocation!);
                   setState(() {
                     isDirectionLoading = false;
+                    Navigator.pop(context);
                   });
                 },
                 child: isDirectionLoading
